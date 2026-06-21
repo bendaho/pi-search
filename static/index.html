@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>$ find /pi --grep "your number"</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700&display=swap');
+
+:root {
+    --bg: #0a0e17;
+    --bg2: #0f1420;
+    --bg3: #161c2e;
+    --green: #00ff9f;
+    --green-dim: #00cc7f;
+    --cyan: #00e5ff;
+    --magenta: #ff00ff;
+    --yellow: #ffd700;
+    --red: #ff3333;
+    --text: #c0c8d8;
+    --text-dim: #5a6478;
+    --border: #1e2a40;
+    --glow: 0 0 20px rgba(0, 255, 159, 0.15);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: 'JetBrains Mono', monospace;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+}
+
+.matrix-bg {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    opacity: 0.03;
+    pointer-events: none;
+    z-index: 0;
+}
+
+.terminal-header {
+    position: relative;
+    z-index: 1;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 24px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.terminal-dots { display: flex; gap: 8px; }
+.terminal-dots span { width: 12px; height: 12px; border-radius: 50%; }
+.terminal-dots span:nth-child(1) { background: #ff5f57; }
+.terminal-dots span:nth-child(2) { background: #ffbd2e; }
+.terminal-dots span:nth-child(3) { background: #28ca42; }
+.terminal-title { color: var(--text-dim); font-size: 13px; flex: 1; text-align: center; }
+
+.container { position: relative; z-index: 1; max-width: 960px; margin: 0 auto; padding: 40px 24px; }
+
+.hero { text-align: center; margin-bottom: 48px; }
+.hero h1 { font-size: 28px; font-weight: 700; color: var(--green); margin-bottom: 8px; text-shadow: 0 0 30px rgba(0, 255, 159, 0.3); }
+.hero h1 .prompt { color: var(--cyan); }
+.hero h1 .path { color: var(--yellow); }
+.hero h1 .flag { color: var(--magenta); }
+.hero h1 .string { color: var(--green); }
+.hero .subtitle { color: var(--text-dim); font-size: 14px; font-weight: 300; }
+
+.stats-bar { display: flex; gap: 24px; justify-content: center; margin: 24px 0 40px; flex-wrap: wrap; }
+.stat { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 20px; text-align: center; }
+.stat .label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+.stat .value { font-size: 18px; font-weight: 700; color: var(--green); }
+.stat .value.loading { color: var(--text-dim); }
+
+.search-box { background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 24px; box-shadow: var(--glow); transition: border-color 0.3s; }
+.search-box:focus-within { border-color: var(--green); }
+
+.search-label { font-size: 12px; color: var(--text-dim); margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+.search-label .caret { color: var(--green); animation: blink 1s step-end infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+
+.input-row { display: flex; gap: 12px; }
+
+#query-input {
+    flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+    padding: 14px 18px; font-family: 'JetBrains Mono', monospace; font-size: 18px;
+    color: var(--green); outline: none; transition: border-color 0.2s; caret-color: var(--green);
+}
+#query-input::placeholder { color: var(--text-dim); font-size: 14px; }
+#query-input:focus { border-color: var(--green); }
+
+#search-btn {
+    background: transparent; border: 1px solid var(--green); border-radius: 8px;
+    padding: 14px 28px; font-family: 'JetBrains Mono', monospace; font-size: 14px;
+    color: var(--green); cursor: pointer; transition: all 0.2s; white-space: nowrap;
+}
+#search-btn:hover { background: var(--green); color: var(--bg); box-shadow: 0 0 20px rgba(0, 255, 159, 0.3); }
+#search-btn:active { transform: scale(0.97); }
+
+.examples { margin-top: 16px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.examples .label { font-size: 11px; color: var(--text-dim); }
+.example-btn {
+    background: var(--bg3); border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 12px; font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    color: var(--text-dim); cursor: pointer; transition: all 0.2s;
+}
+.example-btn:hover { border-color: var(--cyan); color: var(--cyan); }
+
+.results-section { margin-top: 32px; }
+
+.result-meta {
+    font-size: 13px; color: var(--text-dim); margin-bottom: 16px; padding: 12px 16px;
+    background: var(--bg2); border-radius: 8px; border-left: 3px solid var(--green);
+}
+.result-meta .time { color: var(--cyan); font-weight: 700; }
+.result-meta .count { color: var(--yellow); font-weight: 700; }
+.result-meta .cached { color: var(--magenta); font-weight: 700; font-size: 11px; }
+
+.result-card {
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+    margin-bottom: 12px; overflow: hidden; transition: border-color 0.2s;
+    animation: slideIn 0.3s ease-out;
+}
+.result-card:hover { border-color: var(--green-dim); }
+
+@keyframes slideIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.result-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 16px; background: var(--bg3); border-bottom: 1px solid var(--border); font-size: 12px;
+}
+.result-index { color: var(--text-dim); }
+.result-pos { color: var(--cyan); font-weight: 700; }
+
+.result-digits {
+    padding: 16px; font-size: 15px; line-height: 1.8; letter-spacing: 2px; word-break: break-all;
+}
+.result-digits .before { color: var(--text-dim); }
+.result-digits .match { color: var(--bg); background: var(--green); padding: 2px 4px; border-radius: 3px; font-weight: 700; }
+.result-digits .after { color: var(--text-dim); }
+
+.cert-section {
+    margin-top: 24px; padding: 20px; background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+}
+.cert-section .cert-title {
+    font-size: 14px; color: var(--cyan); margin-bottom: 12px; display: flex; align-items: center; gap: 8px;
+}
+.cert-section .cert-title .icon { font-size: 18px; }
+
+.cert-stats {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;
+}
+.cert-stat {
+    background: var(--bg3); border: 1px solid var(--border); border-radius: 6px; padding: 12px;
+}
+.cert-stat .cs-label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+.cert-stat .cs-value { font-size: 20px; font-weight: 700; }
+.cert-stat .cs-value.found { color: var(--green); }
+.cert-stat .cs-value.notfound { color: var(--red); }
+.cert-stat .cs-value.pos { color: var(--cyan); }
+
+#cert-btn {
+    width: 100%; background: linear-gradient(135deg, #0a2a1f, #0f1a2e);
+    border: 1px solid var(--green); border-radius: 8px; padding: 14px;
+    font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 700;
+    color: var(--green); cursor: pointer; transition: all 0.3s;
+    text-transform: uppercase; letter-spacing: 2px;
+}
+#cert-btn:hover {
+    background: linear-gradient(135deg, #0f3a2f, #1a2a4e);
+    box-shadow: 0 0 30px rgba(0, 255, 159, 0.2), inset 0 0 30px rgba(0, 255, 159, 0.05);
+    transform: translateY(-1px);
+}
+#cert-btn:active { transform: translateY(0); }
+
+.no-results { text-align: center; padding: 40px; color: var(--text-dim); }
+.no-results .icon { font-size: 48px; margin-bottom: 16px; opacity: 0.3; }
+
+.loading-anim { display: flex; gap: 4px; justify-content: center; padding: 24px; }
+.loading-anim span { width: 8px; height: 8px; background: var(--green); border-radius: 2px; animation: loadPulse 1s ease-in-out infinite; }
+.loading-anim span:nth-child(2) { animation-delay: 0.1s; }
+.loading-anim span:nth-child(3) { animation-delay: 0.2s; }
+.loading-anim span:nth-child(4) { animation-delay: 0.3s; }
+.loading-anim span:nth-child(5) { animation-delay: 0.4s; }
+@keyframes loadPulse { 0%, 100% { opacity: 0.2; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1.2); } }
+
+.footer { margin-top: 64px; text-align: center; padding: 24px; color: var(--text-dim); font-size: 11px; border-top: 1px solid var(--border); }
+.footer a { color: var(--green-dim); text-decoration: none; }
+
+@media (max-width: 600px) {
+    .hero h1 { font-size: 18px; }
+    .input-row { flex-direction: column; }
+    #search-btn { width: 100%; }
+    .stats-bar { gap: 12px; }
+    .stat { padding: 8px 12px; }
+    .stat .value { font-size: 14px; }
+    .cert-stats { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<canvas class="matrix-bg" id="matrix"></canvas>
+
+<div class="terminal-header">
+    <div class="terminal-dots"><span></span><span></span><span></span></div>
+    <div class="terminal-title">pi-search — bash — 80x24</div>
+</div>
+
+<div class="container">
+    <div class="hero">
+        <h1>
+            <span class="prompt">$</span> find /pi
+            <span class="flag">--grep</span>
+            <span class="string">"your number"</span>
+        </h1>
+        <div class="subtitle">1,000,000,000 digits of pi. Your number is in there somewhere.</div>
+    </div>
+
+    <div class="stats-bar">
+        <div class="stat">
+            <div class="label">Digits loaded</div>
+            <div class="value loading" id="digit-count">...</div>
+        </div>
+        <div class="stat">
+            <div class="label">File size</div>
+            <div class="value">~1 GB</div>
+        </div>
+        <div class="stat">
+            <div class="label">Engine</div>
+            <div class="value">C++ / SQLite</div>
+        </div>
+    </div>
+
+    <div class="search-box">
+        <div class="search-label">
+            <span class="caret">&#9654;</span>
+            Enter your number (birthday, phone, whatever):
+        </div>
+        <div class="input-row">
+            <input type="text" id="query-input" placeholder="e.g. 19900415, 79797979, 314159"
+                   autocomplete="off" spellcheck="false" autofocus>
+            <button id="search-btn" onclick="doSearch()">SEARCH</button>
+        </div>
+        <div class="examples">
+            <span class="label">Try:</span>
+            <button class="example-btn" onclick="setAndSearch('00000000')">eight zeros</button>
+            <button class="example-btn" onclick="setAndSearch('12345678')">12345678</button>
+            <button class="example-btn" onclick="setAndSearch('314159')">314159</button>
+            <button class="example-btn" onclick="setAndSearch('27182818')">27182818</button>
+            <button class="example-btn" onclick="setAndSearch('16180339')">phi digits</button>
+            <button class="example-btn" onclick="setAndSearch('14142135')">sqrt2 digits</button>
+        </div>
+    </div>
+
+    <div class="results-section" id="results"></div>
+
+    <div class="footer">
+        Built with C++ &bull; 10<sup>9</sup> digits &bull; SQLite cache &bull;
+        Source: <a href="https://stuff.mit.edu/afs/sipb/contrib/pi/" target="_blank">MIT SIPB</a>
+    </div>
+</div>
+
+<script>
+const input = document.getElementById('query-input');
+const resultsDiv = document.getElementById('results');
+let debounceTimer;
+let lastQuery = '';
+let lastData = null;
+
+input.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(); });
+input.addEventListener('input', () => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+        if (input.value.replace(/\D/g, '').length >= 3) doSearch();
+    }, 500);
+});
+
+function setAndSearch(val) { input.value = val; doSearch(); }
+
+function checkStats() {
+    fetch('/api/stats')
+        .then(r => r.json())
+        .then(data => {
+            const countEl = document.getElementById('digit-count');
+            if (data.pi_digits_loaded > 0) {
+                countEl.textContent = data.pi_digits_loaded.toLocaleString();
+                countEl.classList.remove('loading');
+            } else { setTimeout(checkStats, 2000); }
+        })
+        .catch(() => setTimeout(checkStats, 3000));
+}
+
+function doSearch() {
+    const raw = input.value.trim();
+    const query = raw.replace(/\D/g, '');
+    if (!query) {
+        resultsDiv.innerHTML = '<div class="no-results"><div class="icon">&#8709;</div>Enter digits to search</div>';
+        return;
+    }
+    lastQuery = query;
+    resultsDiv.innerHTML = '<div class="loading-anim"><span></span><span></span><span></span><span></span><span></span></div>';
+
+    fetch('/api/search?q=' + encodeURIComponent(query))
+        .then(r => r.json())
+        .then(data => { lastData = data; renderResults(data); })
+        .catch(err => {
+            resultsDiv.innerHTML = '<div class="no-results"><div class="icon">&#9888;</div>Connection error: ' + err.message + '</div>';
+        });
+}
+
+function renderResults(data) {
+    if (data.error) {
+        resultsDiv.innerHTML = '<div class="no-results"><div class="icon">&#9203;</div>' + data.error + '</div>';
+        setTimeout(doSearch, 3000);
+        return;
+    }
+
+    let html = '';
+
+    const cacheTag = data.from_cache ? ' <span class="cached">[FROM CACHE]</span>' : '';
+    html += '<div class="result-meta">' +
+        'Query: <strong style="color:var(--green)">"' + data.query + '"</strong> &nbsp;|&nbsp;' +
+        'Found: <span class="count">' + data.total_count + '</span> time' + (data.total_count !== 1 ? 's' : '') + ' &nbsp;|&nbsp;' +
+        'Search time: <span class="time">' + data.search_time_ms + ' ms</span> &nbsp;|&nbsp;' +
+        'Scanned: ' + (data.pi_length || 0).toLocaleString() + ' digits' +
+        cacheTag + '</div>';
+
+    if (data.results.length === 0) {
+        html += '<div class="no-results"><div class="icon">&#8709;</div>Not found in the first billion digits.<br>Your number might be deeper in pi.</div>';
+    } else {
+        data.results.forEach((r, i) => {
+            const posDisplay = (r.position + 1).toLocaleString();
+            html += '<div class="result-card" style="animation-delay:' + (i * 0.05) + 's">' +
+                '<div class="result-header">' +
+                '<span class="result-index">Match #' + (i + 1) + '</span>' +
+                '<span class="result-pos">Position: ' + posDisplay + '</span>' +
+                '</div>' +
+                '<div class="result-digits">' +
+                '<span class="before">' + r.context_before + '</span>' +
+                '<span class="match">' + r.match + '</span>' +
+                '<span class="after">' + r.context_after + '</span>' +
+                '</div></div>';
+        });
+    }
+
+    // Certificate section
+    html += '<div class="cert-section">' +
+        '<div class="cert-title"><span class="icon">&#127942;</span> PI DISCOVERY CERTIFICATE</div>' +
+        '<div class="cert-stats">' +
+        '<div class="cert-stat"><div class="cs-label">Total occurrences</div>' +
+        '<div class="cs-value ' + (data.total_count > 0 ? 'found' : 'notfound') + '">' +
+        data.total_count + '</div></div>' +
+        '<div class="cert-stat"><div class="cs-label">First position after decimal</div>' +
+        '<div class="cs-value ' + (data.first_position >= 0 ? 'pos' : 'notfound') + '">' +
+        (data.first_position >= 0 ? '#' + (data.first_position + 1).toLocaleString() : 'NOT FOUND') +
+        '</div></div></div>' +
+        '<button id="cert-btn" onclick="downloadCert()">&#128196; DOWNLOAD PDF CERTIFICATE</button>' +
+        '</div>';
+
+    resultsDiv.innerHTML = html;
+}
+
+function downloadCert() {
+    if (!lastQuery) return;
+    const url = '/api/certificate?q=' + encodeURIComponent(lastQuery);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'pi-certificate-' + lastQuery + '.pdf';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+}
+
+// Matrix rain
+const canvas = document.getElementById('matrix');
+const ctx = canvas.getContext('2d');
+function resizeCanvas() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+const cols = Math.floor(canvas.width / 14);
+const drops = new Array(cols).fill(1);
+
+function drawMatrix() {
+    ctx.fillStyle = 'rgba(10, 14, 23, 0.05)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#00ff9f';
+    ctx.font = '12px JetBrains Mono';
+    for (let i = 0; i < drops.length; i++) {
+        const ch = Math.floor(Math.random() * 10).toString();
+        ctx.fillText(ch, i * 14, drops[i] * 14);
+        if (drops[i] * 14 > canvas.height && Math.random() > 0.975) drops[i] = 0;
+        drops[i]++;
+    }
+}
+setInterval(drawMatrix, 50);
+
+checkStats();
+</script>
+</body>
+</html>

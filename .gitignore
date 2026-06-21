@@ -1,0 +1,21 @@
+# Build artifacts
+server
+server.o
+sqlite3.o
+*.db
+*.db-shm
+*.db-wal
+
+# Data files (too large for git - download separately)
+pi-billion.txt
+download.log
+
+# Archives
+*.zip
+sqlite-amalgamation-*/
+
+# Generated PDFs (user-specific)
+pi-certificate-*.pdf
+
+# Sample certs
+sample-cert*.pdf
