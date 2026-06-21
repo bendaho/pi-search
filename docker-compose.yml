@@ -1,0 +1,13 @@
+services:
+  pi-search:
+    build: .
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    volumes:
+      - pi-data:/app/data
+    environment:
+      - PORT=8080
+
+volumes:
+  pi-data:

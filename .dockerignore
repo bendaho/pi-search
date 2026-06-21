@@ -1,0 +1,10 @@
+server
+server.o
+sqlite3.o
+*.db*
+*.log
+*.zip
+*.pdf
+sqlite-amalgamation-*/
+pi-billion.txt
+.git
