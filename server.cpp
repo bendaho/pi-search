@@ -24,6 +24,7 @@ static std::mutex db_mutex;
 struct CacheEntry { int tc, fp; std::string json; };
 static std::unordered_map<std::string, CacheEntry> mem_cache;
 static std::mutex cache_mutex;
+static std::string cert_template;
 
 void handle_sigint(int) { running = false; }
 
@@ -142,150 +143,40 @@ struct PDF {
 };
 
 static std::string generate_certificate(const std::string& query, int total_count, int first_position, double search_time_ms) {
-    PDF p;
-    const float W = 842, H = 595;
-    p.fill_bg(W, H, 0.031, 0.047, 0.078);
-
-    // ===== DECORATIVE BORDER =====
-    // Triple-line border
-    p.stroke(12, 12, W-24, H-24, 0.0, 0.85, 1.0, 1.2);
-    p.stroke(18, 18, W-36, H-36, 0.0, 0.5, 0.65, 0.5);
-    p.stroke(22, 22, W-44, H-44, 0.0, 0.3, 0.4, 0.3);
-
-    // Corner ornaments (small L-shapes)
-    float cl = 22;
-    // TL — horizontal at top, vertical going down
-    p.rect(28, H-28, cl, 2, 0.0, 1.0, 0.62);
-    p.rect(28, H-28-cl, 2, cl, 0.0, 1.0, 0.62);
-    // TR — horizontal at top, vertical going down
-    p.rect(W-28-cl, H-28, cl, 2, 0.0, 1.0, 0.62);
-    p.rect(W-28-2, H-28-cl, 2, cl, 0.0, 1.0, 0.62);
-    // BL — horizontal at bottom, vertical going up
-    p.rect(28, 26, cl, 2, 0.0, 1.0, 0.62);
-    p.rect(28, 28, 2, cl, 0.0, 1.0, 0.62);
-    // BR — horizontal at bottom, vertical going up
-    p.rect(W-28-cl, 26, cl, 2, 0.0, 1.0, 0.62);
-    p.rect(W-28-2, 28, 2, cl, 0.0, 1.0, 0.62);
-
-    // ===== HEADER AREA (top 40% of page) =====
-    // Separator line under header
-    p.line(60, H-95, W-60, H-95, 0.0, 0.5, 0.65, 0.8);
-
-    // Title: "CERTIFICATE OF PI DISCOVERY"
-    p.text_center(W/2, H-62, "FB", 32, 1.0, 1.0, 1.0, "CERTIFICATE");
-    p.text_center(W/2, H-82, "FB", 18, 0.0, 0.9, 1.0, "OF  PI  DISCOVERY");
-
-    // Subtitle
-    p.text_center(W/2, H-115, "FI", 11, 0.35, 0.45, 0.55, "1,000,000,000 Digits of Pi Analyzed");
-
-    // ===== PI SYMBOL BOX =====
-    float piBoxW = 120, piBoxH = 55;
-    float piBoxX = W/2 - piBoxW/2;
-    float piBoxY = H - 195;
-    p.rect(piBoxX, piBoxY, piBoxW, piBoxH, 0.05, 0.08, 0.13);
-    p.stroke(piBoxX, piBoxY, piBoxW, piBoxH, 0.0, 0.85, 1.0, 1.0);
-    // Subtle inner glow
-    p.stroke(piBoxX+3, piBoxY+3, piBoxW-6, piBoxH-6, 0.0, 0.3, 0.45, 0.4);
-    p.text_center(W/2, piBoxY + 16, "FB", 26, 0.0, 1.0, 0.62, "PI");
-
-    // ===== "SEARCHING FOR" =====
-    p.text_center(W/2, H-222, "FN", 10, 0.3, 0.4, 0.5, "SEARCHING FOR");
-
-    // ===== NUMBER BOX =====
-    float numBoxW = 440, numBoxH = 52;
-    float numBoxX = W/2 - numBoxW/2;
-    float numBoxY = H - 290;
-
-    // Outer glow
-    p.rect(numBoxX-2, numBoxY-2, numBoxW+4, numBoxH+4, 0.0, 0.08, 0.04);
-    // Box
-    p.rect(numBoxX, numBoxY, numBoxW, numBoxH, 0.06, 0.09, 0.15);
-    p.stroke(numBoxX, numBoxY, numBoxW, numBoxH, 0.0, 1.0, 0.62, 1.8);
-    // Inner line top
-    p.line(numBoxX+8, numBoxY+numBoxH-1, numBoxX+numBoxW-8, numBoxY+numBoxH-1, 0.0, 0.3, 0.2, 0.3);
-
-    // Number text - centered in box
-    char display[256];
-    if (query.size() > 18) {
-        snprintf(display, sizeof(display), "%.8s  ...  %s", query.c_str(), query.c_str() + query.size() - 6);
-    } else {
-        snprintf(display, sizeof(display), "%s", query.c_str());
-    }
-    p.text_center(W/2, numBoxY + 16, "FB", 26, 0.0, 1.0, 0.62, display);
-
-    // ===== SEPARATOR =====
-    p.line(80, H-315, W-80, H-315, 0.12, 0.18, 0.28, 0.8);
-
-    // ===== STATS AREA =====
-    if (total_count == 0) {
-        // NOT FOUND
-        p.text_center(W/2, H-360, "FB", 18, 1.0, 0.15, 0.15, "NOT FOUND IN PI");
-        p.text_center(W/2, H-390, "FN", 11, 0.45, 0.5, 0.55,
-            "This number does not appear in the first billion digits.");
-        p.text_center(W/2, H-410, "FI", 10, 0.3, 0.35, 0.4,
-            "Perhaps it exists deeper in infinity...");
-    } else {
-        // Two stat boxes side by side
-        float boxW = 220, boxH = 90;
-        float gap = 40;
-        float leftX = W/2 - boxW - gap/2;
-        float rightX = W/2 + gap/2;
-        float boxY = H - 420;
-
-        // --- Left box: Total Occurrences ---
-        p.rect(leftX, boxY, boxW, boxH, 0.04, 0.07, 0.12);
-        p.stroke(leftX, boxY, boxW, boxH, 0.0, 0.6, 0.8, 0.7);
-        // Top accent line
-        p.rect(leftX+1, boxY+boxH-3, boxW-2, 3, 0.0, 0.85, 1.0);
-
-        p.text_center(leftX + boxW/2, boxY + boxH - 25, "FN", 8, 0.35, 0.45, 0.55, "OCCURRENCES");
-
-        char cnt[64];
-        snprintf(cnt, sizeof(cnt), "%d", total_count);
-        p.text_center(leftX + boxW/2, boxY + 15, "FB", 34, 0.0, 1.0, 0.62, cnt);
-
-        // --- Right box: First Position ---
-        p.rect(rightX, boxY, boxW, boxH, 0.04, 0.07, 0.12);
-        p.stroke(rightX, boxY, boxW, boxH, 0.0, 0.6, 0.8, 0.7);
-        // Top accent line
-        p.rect(rightX+1, boxY+boxH-3, boxW-2, 3, 0.0, 0.85, 1.0);
-
-        p.text_center(rightX + boxW/2, boxY + boxH - 25, "FN", 8, 0.35, 0.45, 0.55, "FIRST POSITION");
-
-        char pos[64];
-        snprintf(pos, sizeof(pos), "#%d", first_position + 1);
-        p.text_center(rightX + boxW/2, boxY + 15, "FB", 34, 0.0, 1.0, 0.62, pos);
-
-        // Status badge
-        float badgeW = 260, badgeH = 22;
-        float badgeX = W/2 - badgeW/2;
-        float badgeY = boxY - 35;
-        p.rect(badgeX, badgeY, badgeW, badgeH, 0.0, 0.12, 0.06);
-        p.stroke(badgeX, badgeY, badgeW, badgeH, 0.0, 0.8, 0.4, 0.8);
-        p.text_center(W/2, badgeY + 5, "FB", 10, 0.0, 1.0, 0.62, "FOUND IN PI");
-    }
-
-    // ===== FOOTER =====
-    p.line(60, 68, W-60, 68, 0.15, 0.2, 0.3, 0.6);
+    std::string html = cert_template;
 
     auto now = std::time(nullptr);
     char datebuf[64];
     std::strftime(datebuf, sizeof(datebuf), "%Y-%m-%d %H:%M:%S UTC", std::gmtime(&now));
 
-    char f1[256];
-    snprintf(f1, sizeof(f1), "Generated: %s", datebuf);
-    p.text_center(W/2, 50, "FN", 8, 0.3, 0.35, 0.4, f1);
+    char yearbuf[8];
+    std::strftime(yearbuf, sizeof(yearbuf), "%Y", std::gmtime(&now));
 
-    char f2[256];
-    snprintf(f2, sizeof(f2), "Search: %d ms  |  C++ engine  |  MIT SIPB pi-billion.txt", (int)search_time_ms);
-    p.text_center(W/2, 36, "FN", 7, 0.2, 0.25, 0.35, f2);
+    char posbuf[64];
+    snprintf(posbuf, sizeof(posbuf), "%d", first_position + 1);
 
-    // Small decorative dots at bottom center
-    p.rect(W/2-8, 24, 4, 4, 0.0, 0.5, 0.65);
-    p.rect(W/2-1, 24, 4, 4, 0.0, 0.85, 1.0);
-    p.rect(W/2+6, 24, 4, 4, 0.0, 0.5, 0.65);
+    char cntbuf[64];
+    snprintf(cntbuf, sizeof(cntbuf), "%d", total_count);
 
-    return p.render();
+    char msbuf[64];
+    snprintf(msbuf, sizeof(msbuf), "%.0f", search_time_ms);
+
+    auto replace_all = [](std::string& s, const std::string& from, const std::string& to) {
+        size_t pos = 0;
+        while ((pos = s.find(from, pos)) != std::string::npos) {
+            s.replace(pos, from.size(), to);
+            pos += to.size();
+        }
+    };
+
+    replace_all(html, "__QUERY__", query);
+    replace_all(html, "__YEAR__", yearbuf);
+    replace_all(html, "__TOTAL_COUNT__", cntbuf);
+    replace_all(html, "__FIRST_POSITION__", posbuf);
+    replace_all(html, "__GENERATED__", datebuf);
+    replace_all(html, "__SEARCH_TIME__", msbuf);
+
+    return html;
 }
 
 // ---- Database ----
@@ -468,9 +359,8 @@ static void handle_client(int fd) {
         else{auto t0=std::chrono::high_resolution_clock::now();int tc=0,fp=-1; std::string rj;
         if(!db_lookup(q,tc,fp,rj)){auto si=search_pi(q,0);tc=si.tc;fp=si.fp;std::ostringstream rjs;rjs<<"[";for(size_t i=0;i<si.res.size();i++){if(i)rjs<<",";rjs<<"{\"position\":"<<si.res[i].pos<<",\"context_before\":\""<<je(si.res[i].bef)<<"\",\"match\":\""<<je(si.res[i].match)<<"\",\"context_after\":\""<<je(si.res[i].aft)<<"\"}";}rjs<<"]";rj=rjs.str();db_store(q,tc,fp,rj);}
         auto t1=std::chrono::high_resolution_clock::now();double ms=std::chrono::duration<double,std::milli>(t1-t0).count();
-        std::string pdf=generate_certificate(q,tc,fp,ms);
-        std::string hdr="Content-Disposition: attachment; filename=\"pi-cert-"+je(q)+".pdf\"\r\n";
-        sendr(fd,200,"application/pdf",pdf,hdr);}}
+        std::string html=generate_certificate(q,tc,fp,ms);
+        sendr(fd,200,"text/html; charset=utf-8",html);}}
     else if(p=="/api/stats"){std::ostringstream j;j << "{\"pi_digits_loaded\":" << pi_digits.size() << ",\"status\":\"ok\"}";sendr(fd,200,"application/json",j.str());}
     else{auto c=read_file("static"+p);sendr(fd,c.empty()?404:200,get_mime(p),c.empty()?"404":c);}
     close(fd);
@@ -490,6 +380,9 @@ int main(int argc, char* argv[]) {
     auto t1=std::chrono::high_resolution_clock::now();
     std::cerr<<"Loaded "<<pi_digits.size()<<" digits in "<<std::chrono::duration<double,std::milli>(t1-t0).count()<<" ms\n";
     db_warm_cache();
+    {std::ifstream tf("sert2.html");
+    if(tf){std::ostringstream ss;ss<<tf.rdbuf();cert_template=ss.str();std::cerr<<"Cert template loaded: "<<cert_template.size()<<" bytes\n";}
+    else{std::cerr<<"sert2.html not found, certificate endpoint disabled\n";}}
     int sfd=socket(AF_INET,SOCK_STREAM,0); int opt=1;
     setsockopt(sfd,SOL_SOCKET,SO_REUSEADDR,&opt,sizeof(opt));
     struct sockaddr_in addr={AF_INET,htons(port),{INADDR_ANY}};

@@ -377,33 +377,16 @@ function renderResults(data) {
         '<div class="cs-value ' + (data.first_position >= 0 ? 'pos' : 'notfound') + '">' +
         (data.first_position >= 0 ? '#' + (data.first_position + 1).toLocaleString() : 'NOT FOUND') +
         '</div></div></div>' +
-        '<button id="cert-btn" onclick="downloadCert()">&#128196; DOWNLOAD PDF CERTIFICATE</button>' +
+        '<button id="cert-btn" onclick="openCert()">&#127942; VIEW CERTIFICATE</button>' +
         '</div>';
 
     resultsDiv.innerHTML = html;
 }
 
-function downloadCert() {
+function openCert() {
     if (!lastQuery) return;
     const url = '/api/certificate?q=' + encodeURIComponent(lastQuery);
-    const btn = document.getElementById('cert-btn');
-    btn.textContent = '⏳ GENERATING...';
-    btn.disabled = true;
-    fetch(url).then(r => r.blob()).then(blob => {
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = 'pi-cert-' + lastQuery + '.pdf';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(a.href);
-        btn.innerHTML = '&#128196; DOWNLOAD PDF CERTIFICATE';
-        btn.disabled = false;
-    }).catch(err => {
-        btn.innerHTML = '&#9888; ERROR: ' + err.message;
-        btn.disabled = false;
-        setTimeout(() => { btn.innerHTML = '&#128196; DOWNLOAD PDF CERTIFICATE'; }, 3000);
-    });
+    window.open(url, '_blank');
 }
 
 // Matrix rain

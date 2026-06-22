@@ -17,6 +17,7 @@ WORKDIR /app
 
 COPY --from=builder /build/server ./
 COPY static/ ./static/
+COPY sert2.html ./
 
 RUN curl -L -o pi-billion.txt https://stuff.mit.edu/afs/sipb/contrib/pi/pi-billion.txt
 
