@@ -13,11 +13,17 @@ FROM ubuntu:24.04
 
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 COPY --from=builder /build/server ./
 COPY static/ ./static/
 COPY sert2.html ./
+COPY html2pdf.mjs ./
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
 
 RUN curl -L -o pi-billion.txt https://stuff.mit.edu/afs/sipb/contrib/pi/pi-billion.txt
 

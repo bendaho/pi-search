@@ -14,6 +14,8 @@
 #include <atomic>
 #include <mutex>
 #include <unordered_map>
+#include <cstdio>
+#include <sys/wait.h>
 #include "sqlite3.h"
 
 static std::string pi_digits;
@@ -177,6 +179,51 @@ static std::string generate_certificate(const std::string& query, int total_coun
     replace_all(html, "__SEARCH_TIME__", msbuf);
 
     return html;
+}
+
+static std::string html_to_pdf(const std::string& html) {
+    int stdin_pipe[2], stdout_pipe[2], stderr_pipe[2];
+    if (pipe(stdin_pipe) < 0 || pipe(stdout_pipe) < 0 || pipe(stderr_pipe) < 0) return "";
+
+    pid_t pid = fork();
+    if (pid == 0) {
+        close(stdin_pipe[1]);
+        close(stdout_pipe[0]);
+        close(stderr_pipe[0]);
+        dup2(stdin_pipe[0], STDIN_FILENO);
+        dup2(stdout_pipe[1], STDOUT_FILENO);
+        dup2(stderr_pipe[1], STDERR_FILENO);
+        close(stdin_pipe[0]);
+        close(stdout_pipe[1]);
+        close(stderr_pipe[1]);
+        execl("/home/popezio/.local/bin/node", "node", "html2pdf.mjs", nullptr);
+        _exit(1);
+    }
+    close(stdin_pipe[0]);
+    close(stdout_pipe[1]);
+    close(stderr_pipe[1]);
+
+    size_t written = 0;
+    while (written < html.size()) {
+        ssize_t w = write(stdin_pipe[1], html.c_str() + written, html.size() - written);
+        if (w <= 0) break;
+        written += w;
+    }
+    close(stdin_pipe[1]);
+
+    std::string pdf;
+    char buf[8192];
+    ssize_t n;
+    while ((n = read(stdout_pipe[0], buf, sizeof(buf))) > 0) pdf.append(buf, n);
+    close(stdout_pipe[0]);
+
+    std::string stderr_out;
+    while ((n = read(stderr_pipe[0], buf, sizeof(buf))) > 0) stderr_out.append(buf, n);
+    close(stderr_pipe[0]);
+    if (!stderr_out.empty()) std::cerr << "html2pdf stderr: " << stderr_out << "\n";
+
+    waitpid(pid, nullptr, 0);
+    return pdf;
 }
 
 // ---- Database ----
@@ -360,7 +407,10 @@ static void handle_client(int fd) {
         if(!db_lookup(q,tc,fp,rj)){auto si=search_pi(q,0);tc=si.tc;fp=si.fp;std::ostringstream rjs;rjs<<"[";for(size_t i=0;i<si.res.size();i++){if(i)rjs<<",";rjs<<"{\"position\":"<<si.res[i].pos<<",\"context_before\":\""<<je(si.res[i].bef)<<"\",\"match\":\""<<je(si.res[i].match)<<"\",\"context_after\":\""<<je(si.res[i].aft)<<"\"}";}rjs<<"]";rj=rjs.str();db_store(q,tc,fp,rj);}
         auto t1=std::chrono::high_resolution_clock::now();double ms=std::chrono::duration<double,std::milli>(t1-t0).count();
         std::string html=generate_certificate(q,tc,fp,ms);
-        sendr(fd,200,"text/html; charset=utf-8",html);}}
+        std::string pdf=html_to_pdf(html);
+        if(pdf.empty()){sendr(fd,500,"application/json","{\"error\":\"PDF generation failed\"}");}
+        else{std::string hdr="Content-Disposition: attachment; filename=\"pi-cert-"+je(q)+".pdf\"\r\n";
+        sendr(fd,200,"application/pdf",pdf,hdr);}}}
     else if(p=="/api/stats"){std::ostringstream j;j << "{\"pi_digits_loaded\":" << pi_digits.size() << ",\"status\":\"ok\"}";sendr(fd,200,"application/json",j.str());}
     else{auto c=read_file("static"+p);sendr(fd,c.empty()?404:200,get_mime(p),c.empty()?"404":c);}
     close(fd);
