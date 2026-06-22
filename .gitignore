@@ -19,3 +19,7 @@ pi-certificate-*.pdf
 
 # Sample certs
 sample-cert*.pdf
+
+# Logs
+*.log
+tunnel.log

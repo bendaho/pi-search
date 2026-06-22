@@ -70,6 +70,17 @@ body {
 .hero h1 .string { color: var(--green); }
 .hero .subtitle { color: var(--text-dim); font-size: 14px; font-weight: 300; }
 
+.description {
+    max-width: 680px;
+    margin: 0 auto 40px;
+    text-align: center;
+    font-size: 15px;
+    line-height: 1.7;
+    color: var(--text);
+    padding: 0 16px;
+}
+.description strong { color: var(--green); }
+
 .stats-bar { display: flex; gap: 24px; justify-content: center; margin: 24px 0 40px; flex-wrap: wrap; }
 .stat { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 20px; text-align: center; }
 .stat .label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
@@ -224,6 +235,10 @@ body {
         <div class="subtitle">1,000,000,000 digits of pi. Your number is in there somewhere.</div>
     </div>
 
+    <div class="description">
+        <p>Сайт ищет любую комбинацию цифр в числе <strong>Пи</strong> (3,1415926535...). Введите последовательность цифр — и узнайте, на каком месте после запятой она встречается в первом миллиарде знаков Пи. Можно найти день рождения, номер телефона, любую значимую дату или просто случайное число.</p>
+    </div>
+
     <div class="stats-bar">
         <div class="stat">
             <div class="label">Digits loaded</div>
@@ -371,12 +386,24 @@ function renderResults(data) {
 function downloadCert() {
     if (!lastQuery) return;
     const url = '/api/certificate?q=' + encodeURIComponent(lastQuery);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'pi-certificate-' + lastQuery + '.pdf';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    const btn = document.getElementById('cert-btn');
+    btn.textContent = '⏳ GENERATING...';
+    btn.disabled = true;
+    fetch(url).then(r => r.blob()).then(blob => {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'pi-cert-' + lastQuery + '.pdf';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(a.href);
+        btn.innerHTML = '&#128196; DOWNLOAD PDF CERTIFICATE';
+        btn.disabled = false;
+    }).catch(err => {
+        btn.innerHTML = '&#9888; ERROR: ' + err.message;
+        btn.disabled = false;
+        setTimeout(() => { btn.innerHTML = '&#128196; DOWNLOAD PDF CERTIFICATE'; }, 3000);
+    });
 }
 
 // Matrix rain

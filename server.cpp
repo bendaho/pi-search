@@ -13,12 +13,17 @@
 #include <signal.h>
 #include <atomic>
 #include <mutex>
+#include <unordered_map>
 #include "sqlite3.h"
 
 static std::string pi_digits;
 static std::atomic<bool> running{true};
 static sqlite3* db = nullptr;
 static std::mutex db_mutex;
+
+struct CacheEntry { int tc, fp; std::string json; };
+static std::unordered_map<std::string, CacheEntry> mem_cache;
+static std::mutex cache_mutex;
 
 void handle_sigint(int) { running = false; }
 
@@ -149,18 +154,18 @@ static std::string generate_certificate(const std::string& query, int total_coun
 
     // Corner ornaments (small L-shapes)
     float cl = 22;
-    // TL
-    p.rect(28, H-28-cl, cl, 2, 0.0, 1.0, 0.62);
-    p.rect(28, H-28, 2, cl, 0.0, 1.0, 0.62);
-    // TR
-    p.rect(W-28-cl, H-28-cl, cl, 2, 0.0, 1.0, 0.62);
-    p.rect(W-30, H-28, 2, cl, 0.0, 1.0, 0.62);
-    // BL
+    // TL — horizontal at top, vertical going down
+    p.rect(28, H-28, cl, 2, 0.0, 1.0, 0.62);
+    p.rect(28, H-28-cl, 2, cl, 0.0, 1.0, 0.62);
+    // TR — horizontal at top, vertical going down
+    p.rect(W-28-cl, H-28, cl, 2, 0.0, 1.0, 0.62);
+    p.rect(W-28-2, H-28-cl, 2, cl, 0.0, 1.0, 0.62);
+    // BL — horizontal at bottom, vertical going up
     p.rect(28, 26, cl, 2, 0.0, 1.0, 0.62);
     p.rect(28, 28, 2, cl, 0.0, 1.0, 0.62);
-    // BR
+    // BR — horizontal at bottom, vertical going up
     p.rect(W-28-cl, 26, cl, 2, 0.0, 1.0, 0.62);
-    p.rect(W-30, 28, 2, cl, 0.0, 1.0, 0.62);
+    p.rect(W-28-2, 28, 2, cl, 0.0, 1.0, 0.62);
 
     // ===== HEADER AREA (top 40% of page) =====
     // Separator line under header
@@ -289,30 +294,48 @@ static void db_init() {
     sqlite3_exec(db,
         "CREATE TABLE IF NOT EXISTS searches ("
         "query TEXT PRIMARY KEY, total_count INTEGER NOT NULL,"
-        "first_position INTEGER NOT NULL, search_time_ms REAL NOT NULL,"
+        "first_position INTEGER NOT NULL, results_json TEXT NOT NULL,"
         "created_at TEXT NOT NULL);",
         nullptr, nullptr, &err);
     if (err) { std::cerr << "DB: " << err << "\n"; sqlite3_free(err); }
 }
 
-static bool db_lookup(const std::string& q, int& tc, int& fp) {
+static bool db_lookup(const std::string& q, int& tc, int& fp, std::string& rj) {
     std::lock_guard<std::mutex> lk(db_mutex);
     sqlite3_stmt* st;
-    if (sqlite3_prepare_v2(db, "SELECT total_count, first_position FROM searches WHERE query=?;", -1, &st, nullptr) != SQLITE_OK) return false;
+    if (sqlite3_prepare_v2(db, "SELECT total_count, first_position, results_json FROM searches WHERE query=?;", -1, &st, nullptr) != SQLITE_OK) return false;
     sqlite3_bind_text(st, 1, q.c_str(), -1, SQLITE_STATIC);
     bool f = sqlite3_step(st) == SQLITE_ROW;
-    if (f) { tc = sqlite3_column_int(st, 0); fp = sqlite3_column_int(st, 1); }
+    if (f) { tc = sqlite3_column_int(st, 0); fp = sqlite3_column_int(st, 1);
+        const char* r = (const char*)sqlite3_column_text(st, 2); if(r) rj = r; }
     sqlite3_finalize(st);
     return f;
 }
 
-static void db_store(const std::string& q, int tc, int fp, double ms) {
+static void db_store(const std::string& q, int tc, int fp, const std::string& rj) {
     std::lock_guard<std::mutex> lk(db_mutex);
     sqlite3_stmt* st;
     if (sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO searches VALUES(?,?,?,?,datetime('now'));", -1, &st, nullptr) != SQLITE_OK) return;
     sqlite3_bind_text(st, 1, q.c_str(), -1, SQLITE_STATIC);
-    sqlite3_bind_int(st, 2, tc); sqlite3_bind_int(st, 3, fp); sqlite3_bind_double(st, 4, ms);
+    sqlite3_bind_int(st, 2, tc); sqlite3_bind_int(st, 3, fp);
+    sqlite3_bind_text(st, 4, rj.c_str(), -1, SQLITE_STATIC);
     sqlite3_step(st); sqlite3_finalize(st);
+}
+
+static void db_warm_cache() {
+    std::lock_guard<std::mutex> lk(db_mutex);
+    sqlite3_stmt* st;
+    if (sqlite3_prepare_v2(db, "SELECT query, total_count, first_position, results_json FROM searches;", -1, &st, nullptr) != SQLITE_OK) return;
+    int cnt = 0;
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        const char* q = (const char*)sqlite3_column_text(st, 0);
+        int tc = sqlite3_column_int(st, 1);
+        int fp = sqlite3_column_int(st, 2);
+        const char* rj = (const char*)sqlite3_column_text(st, 3);
+        if (q && rj) { mem_cache[q] = {tc, fp, rj}; cnt++; }
+    }
+    sqlite3_finalize(st);
+    std::cerr << "In-memory cache warmed: " << cnt << " entries\n";
 }
 
 // ---- Search ----
@@ -381,25 +404,45 @@ static std::string je(const std::string& s) {
 
 static std::string search_json(const std::string& q) {
     auto t0=std::chrono::high_resolution_clock::now();
-    int tc=0,fp=-1; bool cached=db_lookup(q,tc,fp);
-    std::vector<SR> res;
-    if(!cached){auto si=search_pi(q);tc=si.tc;fp=si.fp;res=si.res;db_store(q,tc,fp,0);}
-    else if(tc>0&&fp>=0){size_t ctx=20,f=fp,a=f>ctx?f-ctx:0,e=std::min(f+q.size()+ctx,pi_digits.size());
-        SR r;r.pos=fp;r.bef=pi_digits.substr(a,f-a);r.match=pi_digits.substr(f,q.size());r.aft=pi_digits.substr(f+q.size(),e-f-q.size());res.push_back(r);}
+    {
+        std::lock_guard<std::mutex> lk(cache_mutex);
+        auto it=mem_cache.find(q);
+        if(it!=mem_cache.end()){
+            auto t1=std::chrono::high_resolution_clock::now();
+            double ms=std::chrono::duration<double,std::milli>(t1-t0).count();
+            std::ostringstream j;
+            j << "{\"query\":\"" << je(q) << "\",\"total_count\":" << it->second.tc << ",\"first_position\":" << it->second.fp
+              << ",\"search_time_ms\":" << std::fixed << j.precision(3) << ms
+              << ",\"from_cache\":true"
+              << ",\"pi_length\":" << pi_digits.size() << ",\"results\":" << it->second.json << "}";
+            return j.str();
+        }
+    }
+    int tc=0,fp=-1; std::string cached_rj; bool cached=db_lookup(q,tc,fp,cached_rj);
     auto t1=std::chrono::high_resolution_clock::now();
     double ms=std::chrono::duration<double,std::milli>(t1-t0).count();
+    if(cached && !cached_rj.empty()){
+        {std::lock_guard<std::mutex> lk(cache_mutex); mem_cache[q]={tc,fp,cached_rj};}
+        std::ostringstream j;
+        j << "{\"query\":\"" << je(q) << "\",\"total_count\":" << tc << ",\"first_position\":" << fp
+          << ",\"search_time_ms\":" << std::fixed << j.precision(3) << ms
+          << ",\"from_cache\":true"
+          << ",\"pi_length\":" << pi_digits.size() << ",\"results\":" << cached_rj << "}";
+        return j.str();
+    }
+    auto si=search_pi(q); tc=si.tc; fp=si.fp;
+    std::ostringstream rj; rj << "[";
+    for(size_t i=0;i<si.res.size();i++){if(i)rj<<",";rj<<"{\"position\":"<<si.res[i].pos<<",\"context_before\":\""<<je(si.res[i].bef)<<"\",\"match\":\""<<je(si.res[i].match)<<"\",\"context_after\":\""<<je(si.res[i].aft)<<"\"}";}
+    rj << "]"; std::string rjs=rj.str();
+    db_store(q,tc,fp,rjs);
+    {std::lock_guard<std::mutex> lk(cache_mutex); mem_cache[q]={tc,fp,rjs};}
     std::ostringstream j;
     j << "{\"query\":\"" << je(q) << "\",\"total_count\":" << tc << ",\"first_position\":" << fp
-      << ",\"total_found\":" << res.size() << ",\"search_time_ms\":" << std::fixed;
+      << ",\"total_found\":" << si.res.size() << ",\"search_time_ms\":" << std::fixed;
     j.precision(3); j << ms
-      << ",\"from_cache\":" << (cached?"true":"false")
-      << ",\"pi_length\":" << pi_digits.size() << ",\"results\":[";
-    for (size_t i = 0; i < res.size(); i++) {
-        if (i) j << ",";
-        j << "{\"position\":" << res[i].pos << ",\"context_before\":\"" << je(res[i].bef)
-          << "\",\"match\":\"" << je(res[i].match) << "\",\"context_after\":\"" << je(res[i].aft) << "\"}";
-    }
-    j << "]}"; return j.str();
+      << ",\"from_cache\":false"
+      << ",\"pi_length\":" << pi_digits.size() << ",\"results\":" << rjs << "}";
+    return j.str();
 }
 
 static void sendr(int fd, int st, const std::string& ct, const std::string& b, const std::string& ex="") {
@@ -422,8 +465,8 @@ static void handle_client(int fd) {
     else if(p.find("/api/search")==0){sendr(fd,200,"application/json",search_json(qs(p,"q")));}
     else if(p.find("/api/certificate")==0){std::string q=qs(p,"q");
         if(q.empty()){sendr(fd,400,"application/json","{\"error\":\"Missing q\"}");}
-        else{auto t0=std::chrono::high_resolution_clock::now();int tc=0,fp=-1;
-        if(!db_lookup(q,tc,fp)){auto si=search_pi(q,0);tc=si.tc;fp=si.fp;db_store(q,tc,fp,0);}
+        else{auto t0=std::chrono::high_resolution_clock::now();int tc=0,fp=-1; std::string rj;
+        if(!db_lookup(q,tc,fp,rj)){auto si=search_pi(q,0);tc=si.tc;fp=si.fp;std::ostringstream rjs;rjs<<"[";for(size_t i=0;i<si.res.size();i++){if(i)rjs<<",";rjs<<"{\"position\":"<<si.res[i].pos<<",\"context_before\":\""<<je(si.res[i].bef)<<"\",\"match\":\""<<je(si.res[i].match)<<"\",\"context_after\":\""<<je(si.res[i].aft)<<"\"}";}rjs<<"]";rj=rjs.str();db_store(q,tc,fp,rj);}
         auto t1=std::chrono::high_resolution_clock::now();double ms=std::chrono::duration<double,std::milli>(t1-t0).count();
         std::string pdf=generate_certificate(q,tc,fp,ms);
         std::string hdr="Content-Disposition: attachment; filename=\"pi-cert-"+je(q)+".pdf\"\r\n";
@@ -446,6 +489,7 @@ int main(int argc, char* argv[]) {
     file.close();
     auto t1=std::chrono::high_resolution_clock::now();
     std::cerr<<"Loaded "<<pi_digits.size()<<" digits in "<<std::chrono::duration<double,std::milli>(t1-t0).count()<<" ms\n";
+    db_warm_cache();
     int sfd=socket(AF_INET,SOCK_STREAM,0); int opt=1;
     setsockopt(sfd,SOL_SOCKET,SO_REUSEADDR,&opt,sizeof(opt));
     struct sockaddr_in addr={AF_INET,htons(port),{INADDR_ANY}};
