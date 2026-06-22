@@ -5,6 +5,7 @@ sqlite3.o
 *.db
 *.db-shm
 *.db-wal
+node_modules/
 
 # Data files (too large for git - download separately)
 pi-billion.txt
